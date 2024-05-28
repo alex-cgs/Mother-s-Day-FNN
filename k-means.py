@@ -49,12 +49,14 @@ train_data = pd.read_csv('db/train.csv')
 
 # Prepare the dataset
 dataset = []
+image_paths = []
 
 for label in classes:
     for _ in range(50):  # Select 50 random images per class for training
         img_path = select_random_image(os.path.join("db/train", label))
         inp = preprocess_image(img_path)
         dataset.append(inp)
+        image_paths.append(img_path)
 
 dataset = np.array(dataset)
 
@@ -75,22 +77,40 @@ for i in range(20):
     cluster = kmeans.predict(inp)
     print(f"Image belongs to cluster: {cluster[0]}")
 
-# Visualize clusters (Optional)
-def visualize_clusters(kmeans, dataset):
-    plt.figure(figsize=(8, 8))
+# Function to plot images at specific coordinates
+def plot_image_at_coordinates(ax, image_path, coords):
+    img = Image.open(image_path).resize((32, 32))  # Resize image for better display on plot
+    img = np.array(img)
+    imagebox = OffsetImage(img, zoom=1)
+    ab = AnnotationBbox(imagebox, coords, frameon=False)
+    ax.add_artist(ab)
+
+# Visualize clusters with images
+def visualize_clusters(kmeans, dataset, image_paths):
+    plt.figure(figsize=(12, 12))
     colors = ['r', 'g', 'b', 'c', 'm', 'y', 'k', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+    ax = plt.gca()
+    
     for i in range(num_clusters):
         cluster_points = dataset[kmeans.labels_ == i]
+        cluster_images = [image_paths[j] for j in range(len(image_paths)) if kmeans.labels_[j] == i]
         plt.scatter(cluster_points[:, 0], cluster_points[:, 1], c=colors[i], label=f'Cluster {i}')
+        
+        # Plot images at their respective coordinates
+        for point, img_path in zip(cluster_points, cluster_images):
+            plot_image_at_coordinates(ax, img_path, point)
+
     plt.scatter(kmeans.cluster_centers_[:, 0], kmeans.cluster_centers_[:, 1], s=300, c='black', marker='X')
-    plt.title('K-means Clustering')
+    plt.title('K-means Clustering with Images')
     plt.legend()
     plt.show()
 
 # Reduce dimensions to 2D for visualization using PCA
 from sklearn.decomposition import PCA
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+
 pca = PCA(n_components=2)
 dataset_2d = pca.fit_transform(dataset)
 kmeans_2d = KMeans(n_clusters=num_clusters, max_iter=num_iterations, random_state=42)
 kmeans_2d.fit(dataset_2d)
-visualize_clusters(kmeans_2d, dataset_2d)
+visualize_clusters(kmeans_2d, dataset_2d, image_paths)
