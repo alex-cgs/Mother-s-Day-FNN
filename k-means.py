@@ -105,10 +105,11 @@ def visualize_clusters(kmeans, dataset, image_paths):
     plt.legend()
     plt.show()
 
-# Reduce dimensions to 2D for visualization using PCA
 from sklearn.decomposition import PCA
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
+
+# Just doin' some PCA to put images at correct dimension
 pca = PCA(n_components=2)
 dataset_2d = pca.fit_transform(dataset)
 kmeans_2d = KMeans(n_clusters=num_clusters, max_iter=num_iterations, random_state=42)

@@ -7,11 +7,12 @@ import os
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
 import matplotlib.pyplot as plt
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 classes = ['astilbe', 'bellflower', 'black_eyed_susan', 'calendula', 'california_poppy', 'carnation', 'common_daisy', 'coreopsis', 'dandelion', 'iris', 'rose', 'sunflower', 'tulip', 'water_lily']
 
 input_dim = 196608
-reduced_dim = 50  # Dimension after PCA reduction
+reduced_dim = 50
 num_clusters = 14
 num_iterations = 500
 
@@ -24,7 +25,7 @@ def select_random_image(directory):
 
 def preprocess_image(image_path):
     img = Image.open(image_path).resize((256, 256))  # Ensure consistent size
-    img_array = np.array(img).flatten()  # Flatten the image to a 1D array
+    img_array = np.array(img).flatten()  # 1D array
     if img_array.shape[0] != input_dim:
         raise ValueError(f"Image at {image_path} does not have the expected size of {input_dim}.")
     return img_array
@@ -65,16 +66,18 @@ train_data = pd.read_csv('db/train.csv')
 
 # Prepare the dataset
 dataset = []
+image_paths = []
 
 for label in classes:
     for _ in range(50):  # Select 50 random images per class for training
         img_path = select_random_image(os.path.join("db/train", label))
         inp = preprocess_image(img_path)
         dataset.append(inp)
+        image_paths.append(img_path)
 
 dataset = np.array(dataset)
 
-# Apply PCA for dimensionality reduction
+# Apply PCA for 1D
 pca = PCA(n_components=reduced_dim)
 dataset_reduced = pca.fit_transform(dataset)
 
@@ -91,25 +94,42 @@ for i in range(20):
     img_path = select_random_image(os.path.join("db/train", label))
     inp = preprocess_image(img_path).reshape(1, -1)
     
-    # Apply PCA to the new input
     inp_reduced = pca.transform(inp)
     
-    # Predict the cluster
     cluster = gmm.predict(inp_reduced)
     print(f"Image belongs to cluster: {cluster[0]}")
 
-# Visualize clusters (Optional)
-def visualize_clusters(pca, gmm, dataset):
-    dataset_2d = pca.transform(dataset)[:, :2]  # Reduce to 2D for visualization
-    plt.figure(figsize=(8, 8))
+# Function to plot images at specific coordinates
+def plot_image_at_coordinates(ax, image_path, coords):
+    img = Image.open(image_path).resize((32, 32))  # Resize image for better display on plot
+    img = np.array(img)
+    imagebox = OffsetImage(img, zoom=1)
+    ab = AnnotationBbox(imagebox, coords, frameon=False)
+    ax.add_artist(ab)
+
+# Visualize clusters with images
+def visualize_clusters(pca, gmm, dataset, image_paths):
+    dataset_reduced = pca.transform(dataset)  # Ensure we have 50 features for GMM
+    dataset_2d = PCA(n_components=2).fit_transform(dataset_reduced)  # Reduce to 2D for visualization
+    
+    plt.figure(figsize=(12, 12))
+    ax = plt.gca()
     colors = ['r', 'g', 'b', 'c', 'm', 'y', 'k', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+    
+    # Plot the data points
     for i in range(num_clusters):
-        cluster_points = dataset_2d[gmm.predict(dataset_2d) == i]
-        plt.scatter(cluster_points[:, 0], cluster_points[:, 1], c=colors[i], label=f'Cluster {i}')
+        cluster_points = dataset_2d[gmm.predict(dataset_reduced) == i]
+        cluster_images = [image_paths[j] for j in range(len(image_paths)) if gmm.predict(dataset_reduced)[j] == i]
+        plt.scatter(cluster_points[:, 0], cluster_points[:, 1], c=colors[i], label=f'Cluster {i}', alpha=0.5)
+        
+        # Plot images at their respective coordinates
+        for point, img_path in zip(cluster_points, cluster_images):
+            plot_image_at_coordinates(ax, img_path, point)
+
     plt.scatter(gmm.means_[:, 0], gmm.means_[:, 1], s=300, c='black', marker='X')
     plt.title('GMM Clustering with PCA-reduced data')
     plt.legend()
     plt.show()
 
 # Visualize the clusters
-visualize_clusters(pca, gmm, dataset)
+visualize_clusters(pca, gmm, dataset, image_paths)

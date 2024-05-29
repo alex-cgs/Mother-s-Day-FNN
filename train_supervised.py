@@ -5,8 +5,7 @@ from PIL import Image
 import random as rd
 import os
 
-learning_rate = 0.01
-
+learning_rate = 0.001  # Initial learning rate
 classes = ['astilbe', 'bellflower', 'black_eyed_susan', 'calendula', 'california_poppy', 'carnation', 'common_daisy', 'coreopsis', 'dandelion', 'iris', 'rose', 'sunflower', 'tulip', 'water_lily']
 
 def sigmoid(x):
@@ -16,41 +15,61 @@ def sigmoid(x):
 def relu(x):
     return np.maximum(0, x)
 
+def softmax(x):
+    exp_x = np.exp(x - np.max(x))
+    return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+
 class Agent:
     def __init__(self):
-        self.w1 = np.random.uniform(-1, 1, size=(196608, 1400))
-        self.w2 = np.random.uniform(-1, 1, size=(1400, 14))
-        self.b1 = np.random.uniform(-1, 1, size=(1, 1400))
-        self.b2 = np.random.uniform(-1, 1, size=(1, 14))
+        self.w1 = np.random.randn(196608, 256) * np.sqrt(2. / 196608)  # He initialization
+        self.w2 = np.random.randn(256, 128) * np.sqrt(2. / 256)  # He initialization
+        self.w3 = np.random.randn(128, 14) * np.sqrt(2. / 128)  # He initialization
+        self.b1 = np.zeros((1, 256))
+        self.b2 = np.zeros((1, 128))
+        self.b3 = np.zeros((1, 14))
         
     def propagate(self, inp):
-        A1 = sigmoid(inp.dot(self.w1) + self.b1)
-        A2 = relu(A1.dot(self.w2) + self.b2)
-        return A2
+        self.Z1 = inp.dot(self.w1) + self.b1
+        self.A1 = relu(self.Z1)
+        
+        self.Z2 = self.A1.dot(self.w2) + self.b2
+        self.A2 = relu(self.Z2)
+        
+        self.Z3 = self.A2.dot(self.w3) + self.b3
+        A3 = softmax(self.Z3)
+        return A3
     
     def backpropagate(self, inp, out):
         m = inp.shape[0]
         
         # Forward propagation
-        A1 = sigmoid(inp.dot(self.w1) + self.b1)
-        A2 = relu(A1.dot(self.w2) + self.b2)
+        A3 = self.propagate(inp)
         
-        # Calculate loss
-        loss = np.sum((A2 - out) ** 2) / m
+        # Loss
+        loss = -np.sum(out * np.log(A3 + 1e-8)) / m  # Cross-entropy loss
         
         # Backpropagation
-        dA2 = 2 * (A2 - out) / m
-        dZ2 = dA2 * np.where(A2 > 0, 1, 0)
+        dZ3 = A3 - out
+        dW3 = self.A2.T.dot(dZ3) / m
+        db3 = np.sum(dZ3, axis=0, keepdims=True) / m
+        dA2 = dZ3.dot(self.w3.T)
+        dZ2 = dA2 * np.where(self.Z2 > 0, 1, 0)
         
-        dW2 = A1.T.dot(dZ2)  # Should be (1400, m).dot(m, 14) = (1400, 14)
-        db2 = np.sum(dZ2, axis=0, keepdims=True)
+        dW2 = self.A1.T.dot(dZ2) / m
+        db2 = np.sum(dZ2, axis=0, keepdims=True) / m
         dA1 = dZ2.dot(self.w2.T)
-        dZ1 = dA1 * sigmoid(A1) * (1 - sigmoid(A1))
+        dZ1 = dA1 * np.where(self.Z1 > 0, 1, 0)
         
-        dW1 = inp.T.dot(dZ1)  # Should be (196608, m).dot(m, 1400) = (196608, 1400)
-        db1 = np.sum(dZ1, axis=0, keepdims=True)
+        dW1 = inp.T.dot(dZ1) / m
+        db1 = np.sum(dZ1, axis=0, keepdims=True) / m
+        
+        # Gradient clipping to prevent exploding gradients
+        for dparam in [dW3, db3, dW2, db2, dW1, db1]:
+            np.clip(dparam, -1, 1, out=dparam)
         
         # Update weights and biases
+        self.w3 -= learning_rate * dW3
+        self.b3 -= learning_rate * db3
         self.w2 -= learning_rate * dW2
         self.b2 -= learning_rate * db2
         self.w1 -= learning_rate * dW1
@@ -60,8 +79,10 @@ def save_agent(agent):
     data = {
         'w1': agent.w1.tolist(),
         'w2': agent.w2.tolist(),
+        'w3': agent.w3.tolist(),
         'b1': agent.b1.tolist(),
-        'b2': agent.b2.tolist()
+        'b2': agent.b2.tolist(),
+        'b3': agent.b3.tolist()
     }
     with open('/nn/s_nn.json', 'w') as file:
         json.dump(data, file)
@@ -73,25 +94,29 @@ def load_agent():
     agent = Agent()
     agent.w1 = np.array(data['w1'])
     agent.w2 = np.array(data['w2'])
+    agent.w3 = np.array(data['w3'])
     agent.b1 = np.array(data['b1'])
     agent.b2 = np.array(data['b2'])
+    agent.b3 = np.array(data['b3'])
     
     return agent
 
 def select_random_image(directory):
-    # List all files in the directory
     files = os.listdir(directory)
-    
-    # Filter out non-image files (optional, depending on your use case)
     image_files = [file for file in files if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
-    
-    # Randomly select an image file
     selected_image = rd.choice(image_files)
-    
-    # Full path of the selected image
     selected_image_path = os.path.join(directory, selected_image)
-    
     return selected_image_path
+
+def preprocess_image(image_path):
+    img = Image.open(image_path).resize((256, 256))
+    img_array = np.array(img).flatten()
+    return img_array
+
+def one_hot_encode(label, num_classes):
+    one_hot = np.zeros((1, num_classes))
+    one_hot[0, classes.index(label)] = 1
+    return one_hot
 
 # Load image templates from train.csv
 train_data = pd.read_csv('db/train.csv')
@@ -99,69 +124,44 @@ train_data = pd.read_csv('db/train.csv')
 # Create agent
 agent = Agent()
 
-# Train on 500 images
-for i in range(500):
-    label = classes[rd.randint(0, 13)]  # Select a random class label
-    # Get input and output for current image
-    img_path = select_random_image("db/train/" + label + "/")  # Correct path formatting
-    # print(label)
-    # print(img_path)
-    img = Image.open(img_path)
-    inp = np.array(img).reshape(1, -1)
+# Train on 200 images with more iterations
+for i in range(200):
+    label = classes[rd.randint(0, 13)]
+    img_path = select_random_image(f"db/train/{label}/")
+    inp = preprocess_image(img_path).reshape(1, -1)
     
     while inp.shape[1] != 196608:
-        label = classes[rd.randint(0, 13)]  # Select a random class label
-        # Get input and output for current image
-        img_path = select_random_image("db/train/" + label + "/")  # Correct path formatting
-        # print(label)
-        # print(img_path)
-        img = Image.open(img_path)
-        inp = np.array(img).reshape(1, -1)
+        label = classes[rd.randint(0, 13)]
+        img_path = select_random_image(f"db/train/{label}/")
+        inp = preprocess_image(img_path).reshape(1, -1)
     
-    # One-hot encode the label
-    out = np.zeros((1, 14))
-    out[0, classes.index(label)] = 1  # Use index of the class label
+    out = one_hot_encode(label, len(classes))
     
-    # Forward propagation
-    A2 = agent.propagate(inp)
-    prediction = np.argmax(A2)
+    A3 = agent.propagate(inp)
+    prediction = np.argmax(A3)
     print(f"Predicted label: {classes[prediction]}, Label: {label}")
 
-    # Calculate loss using the predicted label index
-    loss = (A2[0, prediction] - 1) ** 2 / inp.shape[0]
-
-    # Backpropagation
+    loss = -np.sum(out * np.log(A3 + 1e-8)) / inp.shape[0]
     agent.backpropagate(inp, out)
 
-    # Print progress every iteration
-    if i % 10 == 0:
+    if i % 100 == 0:
         print(f"Iteration: {i}, Loss: {loss}")
-
-        # Save trained agent
         save_agent(agent)
-        
+
+# Testing loop
 for i in range(20):
-    label = classes[rd.randint(0, 13)]  # Select a random class label
-    # Get input and output for current image
-    img_path = select_random_image("db/train/" + label + "/")  # Correct path formatting
-    print(label)
-    print(img_path)
-    img = Image.open(img_path)
-    inp = np.array(img).reshape(1, -1)
+    label = classes[rd.randint(0, 13)]
+    img_path = select_random_image(f"db/train/{label}/")
+    inp = preprocess_image(img_path).reshape(1, -1)
     
     while inp.shape[1] != 196608:
-        label = classes[rd.randint(0, 13)]  # Select a random class label
-        # Get input and output for current image
-        img_path = select_random_image("db/train/" + label + "/")  # Correct path formatting
-        # print(label)
-        # print(img_path)
-        img = Image.open(img_path)
-        inp = np.array(img).reshape(1, -1)
+        label = classes[rd.randint(0, 13)]
+        img_path = select_random_image(f"db/train/{label}/")
+        inp = preprocess_image(img_path).reshape(1, -1)
     
-    # One-hot encode the label
-    out = np.zeros((1, 14))
-    out[0, classes.index(label)] = 1  # Use index of the class label
-    
-    # Forward propagation
-    A2 = agent.propagate(inp)
-    prediction = np.argmax(A2)
+    out = one_hot_encode(label, len(classes))
+    A3 = agent.propagate(inp)
+    prediction = np.argmax(A3)
+    print(f"Test Image Prediction: {classes[prediction]}, Actual Label: {label}")
+
+save_agent(agent)
